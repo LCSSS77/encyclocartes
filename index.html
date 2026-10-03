@@ -42,6 +42,22 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;
 .pills{display:flex;gap:6px}
 .pill{display:flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-weight:700;font-size:.88rem;font-variant-numeric:tabular-nums}
 .pill.gold{color:var(--gold)}
+.acct{position:relative;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;font-weight:800;font-size:.9rem;padding:0}
+.acct svg{width:18px;height:18px}
+.acct .sd{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;border:2px solid var(--bg);background:var(--dim)}
+.acct .sd.ok{background:var(--good)} .acct .sd.err{background:var(--bad)}
+.banner{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid rgba(232,182,76,.35);border-radius:14px;padding:12px 14px;margin-bottom:16px;font-size:.9rem;line-height:1.35}
+.banner .btn{flex:none}
+.err-msg{color:var(--bad);font-size:.88rem;min-height:1.2em;margin:4px 0 8px}
+.field.plain{padding:4px 14px}
+.gate{position:fixed;inset:0;z-index:95;overflow:auto;display:flex;flex-direction:column;align-items:center;background:radial-gradient(ellipse at 50% 18%,#26304a 0%,#07090e 70%);padding:calc(30px + env(safe-area-inset-top,0px)) 20px calc(30px + env(safe-area-inset-bottom,0px))}
+.gate[hidden]{display:none}
+.gate .inner{width:min(400px,100%);margin:auto 0}
+.gate .hero-pack{position:relative;width:118px;aspect-ratio:5/7;margin:0 auto 18px}
+.gate h1{font-family:Spectral,Georgia,serif;font-style:italic;font-weight:700;font-size:2.2rem;text-align:center;margin:0 0 6px}
+.gate .tag{text-align:center;color:var(--muted);margin:0 0 22px;line-height:1.4}
+.gate .panel h3{margin:0 0 12px;font-size:1.15rem}
+.field.plain input{font-size:1rem;font-weight:500}
 main{max-width:760px;margin:0 auto;padding:18px 16px calc(100px + env(safe-area-inset-bottom,0px))}
 h2{font-size:1.5rem;font-weight:800;margin:2px 0 4px;letter-spacing:-.01em}
 .sub{color:var(--muted);margin:0 0 18px;line-height:1.45;max-width:60ch;font-size:.95rem}
@@ -262,7 +278,7 @@ label.lbl{font-size:.85rem;color:var(--muted);font-weight:600}
 <body>
 <header>
   <div class="logo"><i>E</i>Encyclocartes<span class="vip-tag" id="vipTag" hidden>VIP</span></div>
-  <div class="pills"><span class="pill" id="packPill" aria-label="Paquets disponibles"></span><span class="pill gold" id="credPill" aria-label="Crédits"></span></div>
+  <div class="pills"><span class="pill" id="packPill" aria-label="Paquets disponibles"></span><span class="pill gold" id="credPill" aria-label="Crédits"></span><button class="acct" id="acctBtn" data-act="acct" aria-label="Mon compte"></button></div>
 </header>
 
 <main>
@@ -288,6 +304,7 @@ label.lbl{font-size:.85rem;color:var(--muted);font-weight:600}
   <div class="po-actions" id="poActions" hidden></div>
 </div>
 <div class="modal" id="modal" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div class="gate" id="gate" hidden></div>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
@@ -297,10 +314,11 @@ const CFG = {
   VIP_DAYS: 30,
   // Colle ici ton lien de paiement Stripe (Payment Link), ex : "https://buy.stripe.com/xxxx"
   VIP_PAYMENT_URL: "",
-  // Empreintes des codes VIP valides (chaque code ne marche qu'une fois par appareil)
-  VIP_CODE_HASHES: [2014571582,3566297023,3057983495,981653755,4189377130,3134079148,739230650,4159972416,1515264499,2737460610],
+  // Les codes VIP valides sont dans le fichier vip-codes.json (crée-les avec admin.html)
   PACK_PRICE: 200,
   MAX_PACKS: 10,
+  // Colle ici la config Firebase (firebaseConfig) pour activer les comptes
+  FIREBASE: null,
 };
 const PERKS = {
   free:{interval:10*60e3,duels:5,listings:3},
@@ -334,7 +352,8 @@ try{
   if(old&&old.packs==null&&old.bonus!=null)S.packs=Math.min(CFG.MAX_PACKS,old.bonus+1);
   if(!Array.isArray(S.drawn)||S.drawn.length!==6)S.drawn=[0,0,0,0,0,0];
 }catch(e){S=defaults();}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function saveLocal(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function save(){S.updatedAt=Date.now();saveLocal();schedulePush();}
 
 let tab="boosters", filter="all", sortBy="rarity", mkTab="buy", mkLoading=false, armed=null, packBusy=false;
 let D={phase:"select",sel:[]};
@@ -578,6 +597,7 @@ function renderBoosters(){
   regen();
   const full=S.packs>=CFG.MAX_PACKS;
   $("#v-boosters").innerHTML=`
+  ${fbReady()&&!USER?`<div class="banner"><span>Crée un compte pour ne jamais perdre ta progression.</span><button class="btn gold sm" data-act="acct">Créer</button></div>`:""}
   <div class="pack-zone">
     <button class="pack-hero" data-act="open" data-how="free" ${S.packs>0?"":"disabled"} aria-label="Ouvrir un paquet">
       ${S.packs>1?'<span class="stackshadow"></span>':""}${packHTML(false)}<span class="pack-count">×${S.packs}</span>
@@ -862,21 +882,151 @@ function renderVip(){
     ${rows.map(r=>`<div>${r[0]}</div><div class="c">${r[1]}</div><div class="v">${r[2]}</div>`).join("")}</div>
   <div class="panel"><label class="lbl" for="codeIn">Tu as un code VIP ?</label>
     <div class="field"><input id="codeIn" type="text" autocapitalize="characters" autocomplete="off" placeholder="VIP-XXXXXXXX" style="font-size:1rem"><button class="btn gold sm" data-act="vip-code">Activer</button></div>
-    <p class="meta" style="margin:0">Après ton paiement, tu reçois un code à saisir ici. Il active ${CFG.VIP_DAYS} jours de VIP.</p></div>`;
+    <p class="meta" style="margin:0">Après ton paiement, tu reçois un code à saisir ici. Il active ton VIP pour la durée indiquée.</p></div>`;
 }
 function vipBuy(){
   if(CFG.VIP_PAYMENT_URL)window.open(CFG.VIP_PAYMENT_URL,"_blank","noopener");
   else toast("Le paiement arrive bientôt");
 }
-function vipCode(){
-  const code=($("#codeIn").value||"").trim().toUpperCase(),h=hash(code);
+async function sha256(t){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");}
+async function vipCode(){
+  const code=($("#codeIn").value||"").trim().toUpperCase();
   if(!code)return;
-  if(!CFG.VIP_CODE_HASHES.includes(h)){toast("Code invalide");return;}
-  if(S.usedCodes.includes(h)){toast("Ce code a déjà été utilisé");return;}
-  regen();
-  S.usedCodes.push(h);S.vipUntil=Math.max(Date.now(),S.vipUntil)+CFG.VIP_DAYS*864e5;
-  save();syncHeader();toast("VIP activé, profite bien !");renderVip();
+  try{
+    const h=await sha256(code);
+    const j=await (await fetch("vip-codes.json?t="+Date.now(),{cache:"no-store"})).json();
+    const found=(j.codes||[]).find(x=>x.h===h);
+    if(!found){toast("Code invalide");return;}
+    if(S.usedCodes.includes(h)){toast("Ce code a déjà été utilisé");return;}
+    regen();
+    const days=found.days||CFG.VIP_DAYS;
+    S.usedCodes.push(h);S.vipUntil=Math.max(Date.now(),S.vipUntil)+days*864e5;
+    save();syncHeader();toast(`VIP activé pour ${days} jours !`);renderVip();
+  }catch(e){toast("Impossible de vérifier le code, réessaie");}
 }
+
+/* ================= Comptes (Firebase) ================= */
+let FB=null,USER=null,pushT=null,syncState="",acctMode="signup";
+const fbReady=()=>!!(CFG.FIREBASE&&CFG.FIREBASE.apiKey);
+async function initFirebase(){
+  if(!fbReady())return;
+  if(!USER)showGate("loading");
+  try{
+    const B="https://www.gstatic.com/firebasejs/10.12.2/";
+    const [app,auth,fs]=await Promise.all([import(B+"firebase-app.js"),import(B+"firebase-auth.js"),import(B+"firebase-firestore.js")]);
+    const a=app.initializeApp(CFG.FIREBASE);
+    FB={auth:auth.getAuth(a),db:fs.getFirestore(a),A:auth,F:fs};
+    auth.onAuthStateChanged(FB.auth,async u=>{
+      USER=u;
+      if(u){await pullCloud();hideGate();}else showGate("form");
+      syncAcct();renderCurrent();
+    });
+  }catch(e){syncState="err";syncAcct();if(S.owner)hideGate();else showGate("offline");}
+}
+const userRef=()=>FB.F.doc(FB.db,"users",USER.uid);
+function slimSave(){
+  const trim=c=>({...c,extract:(c.extract||"").slice(0,260)});
+  return {...S,market:{t:0,items:[]},cards:Object.fromEntries(Object.entries(S.cards).filter(([,c])=>c.count>0).map(([k,c])=>[k,trim(c)])),listings:S.listings.map(l=>({...l,card:trim(l.card)}))};
+}
+async function pushCloud(){
+  if(!FB||!USER)return;
+  clearTimeout(pushT);pushT=null;
+  try{
+    await FB.F.setDoc(userRef(),{save:JSON.stringify(slimSave()),updatedAt:S.updatedAt||Date.now()},{merge:true});
+    syncState="ok";
+  }catch(e){syncState="err";}
+  syncAcct();
+}
+function schedulePush(){if(!USER)return;clearTimeout(pushT);pushT=setTimeout(pushCloud,2500);}
+async function pullCloud(){
+  try{
+    const snap=await FB.F.getDoc(userRef());
+    const d=snap.exists()?snap.data():null;
+    if(d&&d.pseudo)S.pseudo=d.pseudo;
+    if(d&&d.save){
+      const cloud=JSON.parse(d.save);
+      if(S.owner!==USER.uid||(cloud.updatedAt||0)>(S.updatedAt||0)){
+        S=Object.assign(defaults(),cloud,{owner:USER.uid,pseudo:d.pseudo||cloud.pseudo});
+        saveLocal();
+      }else await pushCloud();
+    }else{S.owner=USER.uid;S.updatedAt=Date.now();saveLocal();await pushCloud();}
+    syncState="ok";
+  }catch(e){syncState="err";}
+  syncHeader();
+}
+function syncAcct(){
+  const b=$("#acctBtn");if(!b)return;
+  const person=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`;
+  b.innerHTML=(USER&&S.pseudo?esc(S.pseudo[0].toUpperCase()):person)+`<span class="sd ${USER?syncState:""}"></span>`;
+}
+const AUTH_ERR={"auth/email-already-in-use":"Cet e-mail a déjà un compte, connecte-toi.","auth/invalid-email":"Adresse e-mail invalide.","auth/weak-password":"Mot de passe trop court (6 caractères minimum).","auth/invalid-credential":"E-mail ou mot de passe incorrect.","auth/wrong-password":"E-mail ou mot de passe incorrect.","auth/user-not-found":"Aucun compte avec cet e-mail.","auth/too-many-requests":"Trop d’essais, réessaie dans quelques minutes.","auth/network-request-failed":"Pas de connexion internet."};
+const authErr=e=>AUTH_ERR[e?.code]||"Une erreur est survenue, réessaie.";
+function openAcct(){
+  if(!fbReady()){sheet(`<h3>Compte</h3><p class="meta">Les comptes ne sont pas encore activés sur ce site. Ta progression est enregistrée sur cet appareil.</p>`);return;}
+  if(!FB){sheet(`<h3>Compte</h3><p class="meta">Connexion au service de comptes…</p>`);return;}
+  if(USER){
+    sheet(`<h3>${esc(S.pseudo||"Mon compte")}</h3>
+      <p class="meta">${esc(USER.email)}<br>${syncState==="err"?"La dernière sauvegarde a échoué, vérifie ta connexion.":"Ta progression est sauvegardée en ligne."}</p>
+      <div class="actions"><button class="btn ghost wide" data-act="acct-sync">Sauvegarder maintenant</button>
+      <button class="btn ghost wide" data-act="acct-out">${armed==="out"?"Confirmer la déconnexion":"Se déconnecter"}</button></div>`);
+    return;
+  }
+  const up=acctMode==="signup";
+  sheet(`<h3>${up?"Créer un compte":"Se connecter"}</h3>
+    <p class="meta">${up?"Ta progression actuelle sera gardée et sauvegardée en ligne. Tu la retrouves sur n’importe quel appareil.":"Ta progression sur cet appareil sera remplacée par celle de ton compte."}</p>`+authFormHTML());
+}
+function authFormHTML(){
+  const up=acctMode==="signup";
+  return `${up?`<label class="lbl" for="aPseudo">Pseudo</label><div class="field plain"><input id="aPseudo" maxlength="20" autocomplete="nickname" placeholder="Ton pseudo"></div>`:""}
+    <label class="lbl" for="aMail">E-mail</label><div class="field plain"><input id="aMail" type="email" autocomplete="email" autocapitalize="off" placeholder="toi@exemple.fr"></div>
+    <label class="lbl" for="aPass">Mot de passe</label><div class="field plain"><input id="aPass" type="password" autocomplete="${up?"new-password":"current-password"}" placeholder="6 caractères minimum"></div>
+    <p class="err-msg" id="aErr" role="alert"></p>
+    <div class="actions"><button class="btn gold wide" data-act="${up?"acct-signup":"acct-login"}">${up?"Créer mon compte":"Me connecter"}</button>
+    <button class="btn ghost wide" data-act="acct-mode">${up?"J’ai déjà un compte":"Créer un compte"}</button>
+    ${up?"":`<button class="linkish" data-act="acct-reset">Mot de passe oublié</button>`}</div>`;
+}
+const gateOpen=()=>!$("#gate").hidden;
+function showGate(state){
+  const g=$("#gate");g.hidden=false;document.body.style.overflow="hidden";closeSheet();
+  const up=acctMode==="signup";
+  g.innerHTML=`<div class="inner"><div class="hero-pack">${packHTML(false)}</div>
+    <h1>Encyclocartes</h1><p class="tag">Chaque article de Wikipédia est une carte.<br>Ouvre des paquets, collectionne et affronte les autres.</p>
+    ${state==="loading"?`<p class="meta" style="text-align:center">Chargement<span class="dots"></span></p>`
+    :state==="offline"?`<div class="panel"><p style="margin:0 0 12px">Il faut une connexion internet pour te connecter.</p><button class="btn gold wide" data-act="gate-retry">Réessayer</button></div>`
+    :`<div class="panel"><h3>${up?"Crée ton compte pour jouer":"Content de te revoir"}</h3>${authFormHTML()}</div>`}</div>`;
+}
+function hideGate(){$("#gate").hidden=true;document.body.style.overflow="";}
+const aVal=id=>($("#"+id)?.value||"").trim();
+function aError(m){const e=$("#aErr");if(e)e.textContent=m;}
+async function doSignup(btn){
+  const pseudo=aVal("aPseudo"),mail=aVal("aMail"),pass=$("#aPass").value;
+  if(pseudo.length<3){aError("Pseudo trop court (3 caractères minimum).");return;}
+  btn.disabled=true;
+  try{
+    S.pseudo=pseudo;S.owner=null;
+    const cred=await FB.A.createUserWithEmailAndPassword(FB.auth,mail,pass);
+    USER=cred.user;S.owner=USER.uid;S.updatedAt=Date.now();saveLocal();
+    await FB.F.setDoc(userRef(),{pseudo,createdAt:Date.now()},{merge:true});
+    await pushCloud();
+    closeSheet();toast(`Bienvenue ${pseudo} !`);syncHeader();syncAcct();renderCurrent();
+  }catch(e){aError(authErr(e));btn.disabled=false;}
+}
+async function doLogin(btn){
+  btn.disabled=true;
+  try{await FB.A.signInWithEmailAndPassword(FB.auth,aVal("aMail"),$("#aPass").value);closeSheet();toast("Connecté, progression récupérée");}
+  catch(e){aError(authErr(e));btn.disabled=false;}
+}
+async function doReset(){
+  const mail=aVal("aMail");if(!mail){aError("Écris ton e-mail au-dessus.");return;}
+  try{await FB.A.sendPasswordResetEmail(FB.auth,mail);aError("");toast("E-mail de réinitialisation envoyé");}
+  catch(e){aError(authErr(e));}
+}
+async function doLogout(){
+  if(armed!=="out"){armed="out";openAcct();return;}
+  armed=null;await pushCloud();await FB.A.signOut(FB.auth);
+  S=defaults();saveLocal();closeSheet();toast("Déconnecté");syncHeader();syncAcct();go("boosters");
+}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&pushT)pushCloud();});
 
 /* ================= Navigation ================= */
 const RENDER={boosters:renderBoosters,collection:renderCollection,market:renderMarket,duel:renderDuel,vip:renderVip};
@@ -916,6 +1066,14 @@ document.addEventListener("click",e=>{
     case "mk-refresh":refreshMarket(true);break;
     case "vip-buy":vipBuy();break;
     case "vip-code":vipCode();break;
+    case "acct":armed=null;openAcct();break;
+    case "acct-mode":acctMode=acctMode==="signup"?"login":"signup";if(gateOpen())showGate("form");else openAcct();break;
+    case "gate-retry":initFirebase();break;
+    case "acct-signup":doSignup(a);break;
+    case "acct-login":doLogin(a);break;
+    case "acct-reset":doReset();break;
+    case "acct-out":doLogout();break;
+    case "acct-sync":pushCloud().then(()=>toast(syncState==="ok"?"Sauvegardé":"Échec de la sauvegarde"));break;
     case "reset":
       if(armed!=="reset"){armed="reset";renderCollection();return;}
       S=defaults();save();syncHeader();D={phase:"select",sel:[]};armed=null;toast("Nouvelle partie");go("boosters");break;
@@ -937,7 +1095,7 @@ setInterval(()=>{
 },1000);
 setInterval(tickMarket,20000);
 
-dayCheck();regen();tickMarket();syncHeader();renderBoosters();mostRead();
+dayCheck();regen();tickMarket();syncHeader();syncAcct();renderBoosters();mostRead();initFirebase();
 </script>
 </body>
 </html>
